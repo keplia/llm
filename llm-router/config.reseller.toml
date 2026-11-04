@@ -1,0 +1,86 @@
+# ============================================================
+# LLM Router — config MODE RESELLER (DeepSeek V4.1-Flash)
+# ============================================================
+# Konsep bisnis:
+#   Client lo -> router ini (key buatan lo, rate limit, billing)
+#             -> API resmi DeepSeek (key lo yang bayar)
+#
+# Harga beli DeepSeek (USD per 1M token, deepseek-flash):
+#   input cache hit : $0.006 (peak) / $0.003 (off-peak)
+#   input cache miss: $0.30  (peak) / $0.15  (off-peak)
+#   output          : $1.20  (peak) / $0.60  (off-peak)
+#   Peak = 01:00-04:00 & 06:00-10:00 UTC (08:00-11:00 & 13:00-17:00 WIB, Sen-Jum)
+#   Sisanya off-peak (malam, weekend) -> harga beli lo 50%!
+#
+# Harga jual di bawah sudah termasuk margin ~67% dari harga peak.
+# Sesuaikan sesuai target margin lo.
+# ============================================================
+
+host = "0.0.0.0"
+port = 8080
+
+# Key pertama client (di-seed saat startup pertama).
+# Selanjutnya generate/revoke key user via dashboard /admin atau /admin/keys.
+api_keys = ["ganti-dengan-key-pertama-lo"]
+
+# Key admin untuk dashboard http://host:8080/admin
+admin_key = "ganti-dengan-admin-key-lo"
+
+usage_db = "usage.db"
+request_timeout_secs = 120
+
+# Rate limit PER KEY client. Ini alat utama lo buat paket:
+#   paket hemat  -> requests_per_day kecil
+#   paket pro    -> lebih longgar
+# 0 = tanpa batas.
+[rate_limit]
+requests_per_minute = 30
+requests_per_day = 2000
+
+[circuit_breaker]
+failure_threshold = 5
+cooldown_secs = 60
+
+# JANGAN diaktifkan untuk produksi chat (jawaban bisa harus bervariasi).
+[cache]
+enabled = false
+ttl_secs = 300
+max_entries = 256
+
+# ------------------------------------------------------------
+# Provider upstream
+# ------------------------------------------------------------
+[providers.deepseek]
+kind = "openai"
+base_url = "https://api.deepseek.com"
+api_keys = ["sk-ISI-KEY-DEEPSEEK-LO"]   # dari platform.deepseek.com
+enabled = true
+
+# (Opsional tapi disarankan) fallback kalau DeepSeek down/rate-limit:
+# daftar di openrouter.ai, beli credit, isi key di bawah.
+# [providers.openrouter]
+# kind = "openai"
+# base_url = "https://openrouter.ai/api/v1"
+# api_keys = ["sk-or-ISI-KEY"]
+# enabled = true
+
+# ------------------------------------------------------------
+# Model yang lo jual ke user
+# ------------------------------------------------------------
+# Harga jual (USD per 1M token). Margin dihitung dari harga PEAK DeepSeek
+# (worst case); di off-peak margin lo jadi jauh lebih besar.
+[models."deepseek-flash"]
+input_price_per_mtok = 0.5
+output_price_per_mtok = 2.0
+routes = [
+    { provider = "deepseek", upstream = "deepseek-flash" },
+    # { provider = "openrouter", upstream = "deepseek/deepseek-v4.1-flash-1017" },
+]
+
+# Nama lain biar client yang expect nama lain tetap kena model yang sama.
+[models."deepseek-v4.1-flash"]
+input_price_per_mtok = 0.5
+output_price_per_mtok = 2.0
+routes = [
+    { provider = "deepseek", upstream = "deepseek-flash" },
+]

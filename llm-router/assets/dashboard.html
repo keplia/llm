@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Router — Admin Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px; padding: 24px; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, select, button {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; font-size: 13px;
+  }
+  input:focus { outline: 1px solid var(--accent); }
+  button { cursor: pointer; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.danger { background: transparent; border-color: var(--red); color: var(--red); }
+  button:hover { filter: brightness(1.2); }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td code { font-size: 12px; color: var(--accent); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill.ok { background: rgba(63,185,80,.15); color: var(--green); }
+  .pill.err { background: rgba(248,81,73,.15); color: var(--red); }
+  .pill.open { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .stat { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .stat .v { font-size: 22px; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .msg { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tabs button { background: transparent; border: none; color: var(--muted); padding: 8px 14px; }
+  .tabs button.active { color: var(--text); border-bottom: 2px solid var(--accent); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <h1>🛰️ LLM Router — Admin Dashboard</h1>
+  <div class="sub">OpenAI-compatible LLM gateway</div>
+
+  <div class="card">
+    <div class="row">
+      <input id="adminKey" type="password" placeholder="Admin key (admin-secret-...)" style="flex:1; min-width: 240px;">
+      <button class="primary" onclick="saveKey()">Simpan & Muat</button>
+      <select id="days" onchange="loadAll()">
+        <option value="1">1 hari</option>
+        <option value="7" selected>7 hari</option>
+        <option value="30">30 hari</option>
+        <option value="90">90 hari</option>
+      </select>
+    </div>
+    <div class="msg" id="connMsg">Masukkan admin key dari config.toml.</div>
+  </div>
+
+  <div class="tabs">
+    <button class="active" data-tab="overview" onclick="showTab('overview')">Overview</button>
+    <button data-tab="usage" onclick="showTab('usage')">Usage Terakhir</button>
+    <button data-tab="keys" onclick="showTab('keys')">API Keys</button>
+    <button data-tab="providers" onclick="showTab('providers')">Providers</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div id="tab-overview">
+    <div class="card"><div class="stat-grid" id="summary"></div></div>
+    <div class="card"><b>Statistik per hari × model × provider</b><div id="statsTable"></div></div>
+    <div class="card"><b>Pengeluaran per API key</b><div id="spendTable"></div></div>
+  </div>
+
+  <!-- USAGE -->
+  <div id="tab-usage" class="hidden">
+    <div class="card"><b>100 request terakhir</b><div id="usageTable"></div></div>
+  </div>
+
+  <!-- KEYS -->
+  <div id="tab-keys" class="hidden">
+    <div class="card">
+      <b>Buat client key baru</b>
+      <div class="row" style="margin-top:8px">
+        <input id="newKeyName" placeholder="Nama / label (mis. budi)" style="flex:1; min-width:200px">
+        <button class="primary" onclick="createKey()">Generate Key</button>
+      </div>
+      <div class="msg" id="newKeyOut"></div>
+    </div>
+    <div class="card"><b>Daftar client key</b><div id="keysTable"></div></div>
+  </div>
+
+  <!-- PROVIDERS -->
+  <div id="tab-providers" class="hidden">
+    <div class="card"><b>Status provider & circuit breaker</b><div id="provTable"></div></div>
+    <div class="card">
+      <b>Cache</b><div id="cacheInfo" class="msg"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="danger" onclick="clearCache()">Kosongkan Cache</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const H = () => ({ "Authorization": "Bearer " + $("adminKey").value, "Content-Type": "application/json" });
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: H(), ...opts });
+  if (r.status === 401 || r.status === 403) { $("connMsg").textContent = "❌ Admin key salah / admin nonaktif."; throw new Error("unauthorized"); }
+  $("connMsg").textContent = "✅ Terhubung.";
+  return r.json();
+}
+
+function saveKey() { localStorage.setItem("adminKey", $("adminKey").value); loadAll(); }
+function showTab(t) {
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === t));
+  ["overview","usage","keys","providers"].forEach(x => $("tab-" + x).classList.toggle("hidden", x !== t));
+}
+function fmtCost(c) { return "$" + Number(c).toFixed(4); }
+function fmtTok(n) { return Number(n).toLocaleString("id-ID"); }
+function fmtTime(ts) { return new Date(ts * 1000).toLocaleString("id-ID"); }
+function pill(text, cls) { return `<span class="pill ${cls}">${text}</span>`; }
+
+function table(rows, cols) {
+  if (!rows.length) return '<div class="msg">Belum ada data.</div>';
+  let head = cols.map(c => `<th>${c.h}</th>`).join("");
+  let body = rows.map(r => "<tr>" + cols.map(c => `<td>${c.f(r)}</td>`).join("") + "</tr>").join("");
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+async function loadAll() {
+  const days = $("days").value;
+  try {
+    // Overview
+    const [stats, spend, cache] = await Promise.all([
+      api(`/admin/stats?days=${days}`), api(`/admin/spend?days=${days}`), api("/admin/cache"),
+    ]);
+    const rows = stats.rows || [];
+    const totalReq = rows.reduce((a, r) => a + r.requests, 0);
+    const totalIn = rows.reduce((a, r) => a + r.prompt_tokens, 0);
+    const totalOut = rows.reduce((a, r) => a + r.completion_tokens, 0);
+    const totalCost = rows.reduce((a, r) => a + r.cost_usd, 0);
+    const totalOk = rows.reduce((a, r) => a + r.success, 0);
+    $("summary").innerHTML = [
+      ["Total Request", fmtTok(totalReq)],
+      ["Sukses", totalReq ? Math.round(100 * totalOk / totalReq) + "%" : "—"],
+      ["Token Input", fmtTok(totalIn)],
+      ["Token Output", fmtTok(totalOut)],
+      ["Total Biaya", fmtCost(totalCost)],
+      ["Cache Entries", String(cache.entries || 0) + (cache.enabled ? "" : " (off)")],
+    ].map(([l, v]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+
+    $("statsTable").innerHTML = table(rows, [
+      { h: "Hari", f: r => r.day }, { h: "Model", f: r => `<code>${r.model}</code>` },
+      { h: "Provider", f: r => r.provider }, { h: "Req", f: r => r.requests },
+      { h: "Token In", f: r => fmtTok(r.prompt_tokens) }, { h: "Token Out", f: r => fmtTok(r.completion_tokens) },
+      { h: "Biaya", f: r => fmtCost(r.cost_usd) },
+    ]);
+    $("spendTable").innerHTML = table(spend.rows || [], [
+      { h: "API Key", f: r => `<code>${r.api_key.slice(0, 14)}…</code>` },
+      { h: "Request", f: r => r.requests },
+      { h: "Token In", f: r => fmtTok(r.prompt_tokens) }, { h: "Token Out", f: r => fmtTok(r.completion_tokens) },
+      { h: "Biaya", f: r => fmtCost(r.cost_usd) },
+    ]);
+
+    // Usage
+    const usage = await api("/admin/usage?limit=100");
+    $("usageTable").innerHTML = table(usage.rows || [], [
+      { h: "Waktu", f: r => fmtTime(r.ts) },
+      { h: "Model", f: r => `<code>${r.model}</code>` },
+      { h: "Provider", f: r => r.provider },
+      { h: "Status", f: r => r.status === "ok" ? pill("ok", "ok") : pill("error", "err") },
+      { h: "Stream", f: r => r.stream ? "🔁" : "—" },
+      { h: "Latency", f: r => r.duration_ms + " ms" },
+      { h: "Token (in/out)", f: r => `${r.prompt_tokens} / ${r.completion_tokens}` },
+      { h: "Biaya", f: r => fmtCost(r.cost_usd) },
+    ]);
+
+    // Keys
+    const keys = await api("/admin/keys");
+    $("keysTable").innerHTML = table(keys.keys || [], [
+      { h: "Key", f: k => `<code>${k.key.slice(0, 12)}…${k.key.slice(-4)}</code>` },
+      { h: "Nama", f: k => k.name || "—" },
+      { h: "Dibuat", f: k => fmtTime(k.created_at) },
+      { h: "", f: k => `<button class="danger" onclick="revokeKey('${k.key}')">Revoke</button>` },
+    ]);
+
+    // Providers + cache
+    const prov = await api("/admin/providers");
+    $("provTable").innerHTML = table(prov.providers || [], [
+      { h: "Provider", f: p => `<code>${p.provider}</code>` },
+      { h: "Jenis", f: p => p.kind },
+      { h: "URL", f: p => p.base_url },
+      { h: "Keys", f: p => p.api_keys },
+      { h: "Circuit", f: p => p.circuit_open ? pill("OPEN", "open") : pill("closed", "ok") },
+      { h: "Gagal Beruntun", f: p => p.consecutive_failures },
+      { h: "", f: p => `<button onclick="resetProvider('${p.provider}')">Reset</button>` },
+    ]);
+    $("cacheInfo").textContent = cache.enabled
+      ? `Cache aktif — ${cache.entries} entri (TTL ${cache.ttl_secs}s, maks ${cache.max_entries}).`
+      : "Cache nonaktif (aktifkan lewat [cache] enabled = true di config.toml).";
+  } catch (e) { /* pesan error sudah ditampilkan */ }
+}
+
+async function createKey() {
+  const name = $("newKeyName").value.trim();
+  const out = await api("/admin/keys", { method: "POST", body: JSON.stringify({ name }) });
+  $("newKeyOut").innerHTML = `Key baru: <code>${out.key}</code> (salin sekarang!)`;
+  $("newKeyName").value = "";
+  loadAll();
+}
+
+async function revokeKey(key) {
+  if (!confirm("Revoke key ini? Client yang pakai key ini langsung tidak bisa akses.")) return;
+  await api("/admin/keys/" + encodeURIComponent(key), { method: "DELETE" });
+  loadAll();
+}
+
+async function resetProvider(name) {
+  await api("/admin/providers/" + encodeURIComponent(name) + "/reset", { method: "POST" });
+  loadAll();
+}
+
+async function clearCache() {
+  const r = await api("/admin/cache", { method: "DELETE" });
+  alert(r.cleared + " entri cache dihapus");
+  loadAll();
+}
+
+// Auto-load kalau key sudah tersimpan
+const saved = localStorage.getItem("adminKey");
+if (saved) { $("adminKey").value = saved; loadAll(); }
+</script>
+</body>
+</html>

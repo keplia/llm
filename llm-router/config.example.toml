@@ -1,0 +1,119 @@
+# ============================================================
+# Konfigurasi LLM Router
+# Salin file ini jadi config.toml lalu isi sesuai kebutuhan:
+#   cp config.example.toml config.toml
+# ============================================================
+
+host = "0.0.0.0"
+port = 8080
+
+# API key yang dipakai CLIENT untuk akses router ini.
+# Di-seed ke database saat startup; selanjutnya bisa dikelola via /admin/keys.
+# Kosongkan list (= []) kalau mau tanpa auth (dev only).
+api_keys = ["sk-router-local-123"]
+
+# API key khusus untuk endpoint /admin/*.
+# Kosong (= "") untuk menonaktifkan admin API.
+admin_key = "admin-secret-123"
+
+# Database SQLite untuk usage tracking + daftar client key.
+usage_db = "usage.db"
+
+# Timeout per request (detik), hanya untuk response non-streaming.
+request_timeout_secs = 120
+
+# Rate limit per API key client (sliding window). 0 = tanpa batas.
+[rate_limit]
+requests_per_minute = 60
+requests_per_day = 0
+
+# Circuit breaker per provider: kalau gagal beruntun sampai threshold,
+# provider di-skip selama cooldown_secs, lalu dicoba lagi.
+[circuit_breaker]
+failure_threshold = 5
+cooldown_secs = 60
+
+# Cache response non-streaming (request identik = hash body sama).
+# Bagus buat demo/testing, hati-hati untuk chat karena jawaban bisa bervariasi.
+[cache]
+enabled = false
+ttl_secs = 300
+max_entries = 256
+
+# ------------------------------------------------------------
+# Daftar provider upstream.
+# kind bisa: "openai" | "anthropic" | "gemini"
+# kind "openai" dipakai juga untuk semua yang OpenAI-compatible:
+#   OpenRouter, Groq, Together, DeepSeek, Mistral, Ollama, vLLM, dll.
+# ------------------------------------------------------------
+[providers.openai]
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+api_keys = ["sk-ISI-KEY-OPENAI"]
+enabled = true
+
+[providers.anthropic]
+kind = "anthropic"
+base_url = "https://api.anthropic.com/v1"
+api_keys = ["<OPENAI_API_KEY>"]
+enabled = true
+
+[providers.gemini]
+kind = "gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+api_keys = ["ISI-KEY-GEMINI"]
+enabled = true
+
+# Contoh provider OpenAI-compatible lain
+[providers.openrouter]
+kind = "openai"
+base_url = "https://openrouter.ai/api/v1"
+api_keys = ["sk-or-ISI-KEY"]
+enabled = true
+
+# Ollama lokal (tidak butuh API key -> biarkan api_keys kosong)
+[providers.ollama]
+kind = "openai"
+base_url = "http://localhost:11434/v1"
+api_keys = []
+enabled = true
+
+# ------------------------------------------------------------
+# Routing model: alias yang dilihat client -> provider upstream.
+# routes dievaluas BERURUTAN: index 0 = primary,
+# sisanya = fallback otomatis kalau primary gagal (5xx/429/timeout).
+# ------------------------------------------------------------
+[models."gpt-4o"]
+# Harga USD per 1 juta token (opsional, untuk billing di admin dashboard)
+input_price_per_mtok = 2.5
+output_price_per_mtok = 10.0
+routes = [
+    { provider = "openai", upstream = "gpt-4o" },
+    { provider = "openrouter", upstream = "openai/gpt-4o" },
+]
+
+[models."gpt-4o-mini"]
+routes = [
+    { provider = "openai", upstream = "gpt-4o-mini" },
+    { provider = "openrouter", upstream = "openai/gpt-4o-mini" },
+]
+
+[models."claude-sonnet"]
+routes = [
+    { provider = "anthropic", upstream = "claude-sonnet-4-5" },
+    { provider = "openrouter", upstream = "anthropic/claude-sonnet-4.5" },
+]
+
+[models."gemini-flash"]
+routes = [
+    { provider = "gemini", upstream = "gemini-2.0-flash" },
+]
+
+# Model lokal via Ollama
+[models."llama-local"]
+routes = [
+    { provider = "ollama", upstream = "llama3.1" },
+]
+
+# Bisa juga langsung pakai format "provider/model" tanpa alias,
+# contoh: "openrouter/meta-llama/llama-3.1-70b-instruct"
